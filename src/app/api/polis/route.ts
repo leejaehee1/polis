@@ -43,6 +43,9 @@ export async function GET(request: NextRequest) {
     const { topics, profile } = await readState(actor, demo, isDemo);
     return NextResponse.json({
       mode: isDemo ? "demo" : "firebase",
+      ...(process.env.POLIS_MODE === "firebase-emulator" ? {
+        authEmulator: "http://" + process.env.FIREBASE_AUTH_EMULATOR_HOST,
+      } : {}),
       firebase: isDemo ? null : {
         projectId: process.env.FIREBASE_PROJECT_ID, apiKey: process.env.FIREBASE_API_KEY,
         authDomain: process.env.FIREBASE_AUTH_DOMAIN, appId: process.env.FIREBASE_APP_ID,

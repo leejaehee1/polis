@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import type { FirebaseOptions } from "firebase/app";
-import type { Auth } from "firebase/auth";
+import type { Auth, User } from "firebase/auth";
 import { categories, consentText, consentVersion, roles } from "@/lib/policy";
 import type { Command, Profile, PublicTopic, Role } from "@/lib/policy";
 import type { StaffTopic } from "@/lib/store";
@@ -11,7 +11,7 @@ import { formValues, formatDate } from "./ui";
 import { Studio } from "./studio";
 
 type Snapshot = {
-  mode: "demo" | "firebase"; firebase: FirebaseOptions | null;
+  mode: "demo" | "firebase"; firebase: FirebaseOptions | null; authEmulator?: string;
   viewer: { role: Role; profile?: Profile; consented: boolean } | null;
   topics: PublicTopic[]; staff: StaffTopic[];
 };
@@ -31,9 +31,13 @@ function useSnapshot() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [checkingAccount, setCheckingAccount] = useState(false);
+  const [retryAccount, setRetryAccount] = useState(false);
+  const activeSession = useRef(false);
+  const snapshotRequest = useRef(0);
 
-  const request = useCallback(async (active?: Auth, body?: Command | { type: "demoRole"; role: Role | null }) => {
-    const token = await active?.currentUser?.getIdToken();
+  const request = useCallback(async (user?: User | null, body?: Command | { type: "demoRole"; role: Role | null }) => {
+    const token = await user?.getIdToken();
     const response = await fetch("/api/polis", {
       cache: "no-store", method: body ? "POST" : "GET",
       headers: { ...(token ? { Authorization: "Bearer " + token } : {}), ...(body ? { "Content-Type": "application/json" } : {}) },
@@ -44,10 +48,19 @@ function useSnapshot() {
     return result;
   }, []);
 
-  const refresh = useCallback(async (active?: Auth) => {
-    const snapshot: Snapshot = await request(active);
-    setData(snapshot);
-    return snapshot;
+  const refresh = useCallback(async (user?: User | null) => {
+    const revision = ++snapshotRequest.current;
+    try {
+      const snapshot: Snapshot = await request(user);
+      if (revision === snapshotRequest.current) {
+        setData(snapshot);
+        setError("");
+        setRetryAccount(false);
+        return snapshot;
+      }
+    } catch (cause) {
+      if (revision === snapshotRequest.current) throw cause;
+    }
   }, [request]);
 
   useEffect(() => {
@@ -57,38 +70,45 @@ function useSnapshot() {
       if (!live) return;
       setData(snapshot);
       if (snapshot.firebase) {
-        const [{ getApps, initializeApp }, { getAuth, onIdTokenChanged }] = await Promise.all([
+        const [{ getApps, initializeApp }, { connectAuthEmulator, getAuth, onIdTokenChanged }] = await Promise.all([
           import("firebase/app"), import("firebase/auth"),
         ]);
         if (!live) return;
         const app = getApps()[0] ?? initializeApp(snapshot.firebase);
         const active = getAuth(app);
-        setAuth(active);
-        unsubscribe = onIdTokenChanged(active, () => {
-          request(active).then((next) => {
-            if (live) { setData(next); setError(""); }
-          }).catch((cause: Error) => { if (live) setError(cause.message); });
+        if (snapshot.authEmulator && !active.emulatorConfig) connectAuthEmulator(active, snapshot.authEmulator);
+        unsubscribe = onIdTokenChanged(active, (user) => {
+          if (activeSession.current) return;
+          void refresh(user).catch((cause: Error) => {
+            if (live) {
+              setError(cause.message);
+              setRetryAccount(!!user);
+            }
+          });
         });
+        setAuth(active);
       }
     }).catch((cause: Error) => { if (live) setError(cause.message); });
-    return () => { live = false; unsubscribe?.(); };
-  }, [request]);
+    return () => { live = false; snapshotRequest.current++; unsubscribe?.(); };
+  }, [refresh, request]);
 
   async function submit(body: Command | { type: "demoRole"; role: Role | null }) {
     if (busy) return false;
     setBusy(true);
     setError("");
     setNotice("");
+    const user = auth?.currentUser;
     try {
-      await request(auth, body);
+      await request(user, body);
     } catch (cause) {
       setError((cause as Error).message);
       setBusy(false);
       return false;
     }
     try {
-      await refresh(auth);
-      setNotice(body.type === "demoRole" ? "" : "변경 사항을 저장했습니다.");
+      await refresh(user);
+      if (body.type === "consent" && user) setNotice("가입을 완료했습니다. 로그인 상태입니다.");
+      else setNotice(body.type === "demoRole" ? "" : "변경 사항을 저장했습니다.");
     } catch {
       setError("변경 사항을 저장했습니다. 최신 화면을 보려면 새로고침해 주세요.");
     } finally {
@@ -98,22 +118,42 @@ function useSnapshot() {
   }
 
   async function session(login: boolean) {
-    if (!auth || busy) return;
+    if (!auth || busy || activeSession.current) return;
+    activeSession.current = true;
+    ++snapshotRequest.current;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const { signInWithPopup, GoogleAuthProvider, signOut } = await import("firebase/auth");
-      if (login) await signInWithPopup(auth, new GoogleAuthProvider());
-      else await signOut(auth);
-    } catch {
-      setError("로그인 상태를 변경하지 못했습니다. 다시 시도해 주세요.");
-    } finally { setBusy(false); }
+      if (login) {
+        // The popup returns the signed-in user before the account view needs to update.
+        const user = auth.currentUser ?? (await signInWithPopup(auth, new GoogleAuthProvider())).user;
+        setCheckingAccount(true);
+        const snapshot = await refresh(user);
+        if (snapshot?.viewer?.consented) setNotice("로그인했습니다.");
+      } else {
+        await signOut(auth);
+        setData((current) => current && { ...current, viewer: null, staff: [] });
+        await refresh(null);
+      }
+    } catch (cause) {
+      const user = auth.currentUser;
+      setRetryAccount(login && !!user);
+      if (login && user && cause instanceof Error) setError(cause.message);
+      else if (login && (cause as { code?: string })?.code === "auth/popup-closed-by-user") setError("Google 로그인 창이 닫혔습니다. 다시 시도할 수 있습니다.");
+      else setError("로그인 상태를 변경하지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      activeSession.current = false;
+      setCheckingAccount(false);
+      setBusy(false);
+    }
   }
-  return { data, error, notice, busy, submit, session };
+  return { data, error, notice, busy, submit, session, authReady: !!auth, checkingAccount, retryAccount };
 }
 
 export function Polis() {
-  const { data, error, notice, busy, submit, session } = useSnapshot();
+  const { data, error, notice, busy, submit, session, authReady, checkingAccount, retryAccount } = useSnapshot();
   const [route, setRoute] = useState<Destination>({ page: "home" });
   useEffect(() => {
     const update = () => setRoute(destination());
@@ -133,7 +173,7 @@ export function Polis() {
       {data?.mode === "demo" ? <>
         <p className="lead">역할을 바꿔 학습, 토론, 검수 과정을 체험할 수 있습니다. 데모 입력은 이 브라우저 세션에만 저장됩니다.</p>
         <div className="actions">{roles.map((role) => <button key={role} type="button" aria-pressed={viewer?.role === role} className={viewer?.role === role ? "primary" : "secondary"} onClick={() => void submit({ type: "demoRole", role })} disabled={busy}>{roleNames[role]}</button>)}</div>
-      </> : !viewer && <button className="primary" onClick={() => void session(true)} disabled={!data || busy}>Google로 가입 또는 로그인</button>}
+      </> : !viewer && <button className="primary" onClick={() => void session(true)} disabled={!authReady || busy}>{checkingAccount ? "계정 확인 중" : busy ? "Google 로그인 진행 중" : retryAccount ? "계정 상태 다시 확인" : "Google로 가입 또는 로그인"}</button>}
       {viewer && <div className="section-rule">
         <h2>{viewer.profile?.name ?? roleNames[viewer.role]}</h2>
         {viewer.consented ? <p>동의 버전 {viewer.profile?.version} · {viewer.profile && formatDate(viewer.profile.acceptedAt)}</p>

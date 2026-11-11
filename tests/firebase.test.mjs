@@ -179,3 +179,67 @@ test("Firebase emulators verify identity, claims, consent, publication and Fires
   await auth.updateUser(member.uid, { disabled: true });
   await send(member.token, undefined, 401);
 });
+
+
+test("Google popup signup and consent update the account view without reloading", {
+  skip: process.env.POLIS_FIREBASE_BROWSER !== "1", timeout: 60_000,
+}, async (t) => {
+  assert.match(authHost ?? "", local);
+  assert.match(dbHost ?? "", local);
+  const server = startServer();
+  t.after(() => server.close());
+  await server.ready();
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ channel: process.env.POLIS_TEST_BROWSER ?? "chrome" });
+  t.after(() => browser.close());
+  const context = await browser.newContext();
+  context.setDefaultTimeout(12_000);
+  // The emulator widget works without its optional Material Design CDN assets.
+  await context.route("https://unpkg.com/**", (route) => route.abort());
+  const page = await context.newPage();
+  const email = randomUUID() + "@example.test";
+  const nickname = "가입 확인 시민";
+  await page.goto(origin + "/#account");
+  let reloads = 0;
+  page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) reloads++; });
+
+  let failFirstAccountRead = true;
+  await page.route("**/api/polis", async (route) => {
+    const request = route.request();
+    if (failFirstAccountRead && request.method() === "GET" && request.headers().authorization) {
+      failFirstAccountRead = false;
+      await route.fulfill({ status: 503, json: { error: "계정 확인 일시 오류" } });
+      return;
+    }
+    await route.continue();
+  });
+  const [popup] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("button", { name: "Google로 가입 또는 로그인" }).click(),
+  ]);
+  await popup.waitForLoadState("domcontentloaded");
+  await popup.getByRole("button", { name: "Add new account" }).click();
+  await popup.locator("#email-input").fill(email);
+  await popup.locator("#sign-in").click();
+
+  await page.getByRole("button", { name: "계정 상태 다시 확인" }).click();
+  await page.getByLabel("공개 닉네임").fill(nickname);
+  await page.getByLabel("이용 규칙에 동의합니다").check();
+  await page.getByLabel("개인정보 안내에 동의합니다").check();
+  await page.getByRole("button", { name: "동의하고 참여하기" }).click();
+  await page.getByRole("heading", { name: nickname }).waitFor();
+  await page.getByRole("status").getByText("가입을 완료했습니다. 로그인 상태입니다.").waitFor();
+  assert.equal(reloads, 0);
+
+  await page.getByRole("button", { name: "로그아웃" }).click();
+  const [returningPopup] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("button", { name: "Google로 가입 또는 로그인" }).click(),
+  ]);
+  await returningPopup.waitForLoadState("domcontentloaded");
+  await returningPopup.getByText(email, { exact: true }).click();
+  await page.getByRole("heading", { name: nickname }).waitFor();
+  await page.getByRole("status").getByText("로그인했습니다.", { exact: true }).waitFor();
+  assert.equal(reloads, 0);
+});

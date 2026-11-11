@@ -54,3 +54,5 @@ npm run test:firebase
 ```
 
 테스트는 로컬 `demo-polis` 프로젝트의 Auth와 Firestore 에뮬레이터를 사용합니다. `firebase-emulator` 모드는 로컬 주소와 `demo-` 프로젝트 ID, 두 에뮬레이터 설정이 모두 필요합니다. 일반 Firebase 모드는 에뮬레이터 환경변수가 설정되어 있으면 요청을 거부합니다. 테스트 계정과 역할을 만들고 토큰 검증, 동의 이력, 독립 검수, 발행 및 정정, 신고 처리, Firestore 직접 접근 차단을 검사합니다. 앱을 재시작해도 테스트 중 저장한 공개 이력이 유지되는지 확인합니다. 테스트 서버는 3011번 포트를 사용합니다. 실제 Google 로그인 팝업은 Firebase 프로젝트가 설정된 환경에서 확인합니다.
+
+Chrome에서 가입 팝업과 동의 화면도 검증하려면 `POLIS_FIREBASE_BROWSER=1 npm run test:firebase`를 실행합니다.
