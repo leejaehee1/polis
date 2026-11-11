@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { setTimeout as wait } from "node:timers/promises";
 import { deleteApp, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -242,4 +243,26 @@ test("Google popup signup and consent update the account view without reloading"
   await page.getByRole("heading", { name: nickname }).waitFor();
   await page.getByRole("status").getByText("로그인했습니다.", { exact: true }).waitFor();
   assert.equal(reloads, 0);
+});
+
+test("role command previews before writing, preserves other claims and can remove a role", async (t) => {
+  assert.match(authHost ?? "", local);
+  const app = initializeApp({ projectId }, "role-command-test");
+  t.after(() => deleteApp(app));
+  const auth = getAuth(app);
+  const member = await account(auth);
+  const unverified = await account(auth, null, false);
+  await auth.setCustomUserClaims(member.uid, { unrelatedClaim: true });
+
+  const run = (uid, role, ...flags) => promisify(execFile)(process.execPath, [
+    "scripts/polis-role.mjs", "--project", projectId, "--uid", uid, "--role", role, ...flags,
+  ], { env: { ...process.env, FIREBASE_PROJECT_ID: projectId } });
+
+  await run(member.uid, "reviewer");
+  assert.deepEqual((await auth.getUser(member.uid)).customClaims, { unrelatedClaim: true });
+  await assert.rejects(run(unverified.uid, "reviewer", "--apply"), /이메일을 인증한 활성 계정/);
+  await run(member.uid, "reviewer", "--apply");
+  assert.deepEqual((await auth.getUser(member.uid)).customClaims, { unrelatedClaim: true, polisRole: "reviewer" });
+  await run(member.uid, "member", "--apply");
+  assert.deepEqual((await auth.getUser(member.uid)).customClaims, { unrelatedClaim: true });
 });

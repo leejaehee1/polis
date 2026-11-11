@@ -56,3 +56,16 @@ npm run test:firebase
 테스트는 로컬 `demo-polis` 프로젝트의 Auth와 Firestore 에뮬레이터를 사용합니다. `firebase-emulator` 모드는 로컬 주소와 `demo-` 프로젝트 ID, 두 에뮬레이터 설정이 모두 필요합니다. 일반 Firebase 모드는 에뮬레이터 환경변수가 설정되어 있으면 요청을 거부합니다. 테스트 계정과 역할을 만들고 토큰 검증, 동의 이력, 독립 검수, 발행 및 정정, 신고 처리, Firestore 직접 접근 차단을 검사합니다. 앱을 재시작해도 테스트 중 저장한 공개 이력이 유지되는지 확인합니다. 테스트 서버는 3011번 포트를 사용합니다. 실제 Google 로그인 팝업은 Firebase 프로젝트가 설정된 환경에서 확인합니다.
 
 Chrome에서 가입 팝업과 동의 화면도 검증하려면 `POLIS_FIREBASE_BROWSER=1 npm run test:firebase`를 실행합니다.
+
+### 첫 운영자와 검수자 지정
+
+Firebase Authentication 사용자 목록에서 가입을 마친 회원의 UID를 확인합니다. 발행 운영자는 승인된 주제를 발행할 수 있고, 편집자가 작성한 초안은 작성자와 다른 검수자가 확인해야 합니다. 운영자가 직접 초안을 작성하면 별도 검수자 계정이 필요합니다.
+
+로컬 Firebase 설정 파일이 `.env.firebase.local`인 경우 아래 명령으로 대상과 역할을 먼저 확인합니다.
+
+```sh
+node --env-file=.env.firebase.local scripts/polis-role.mjs \
+  --project FIREBASE_PROJECT_ID --uid FIREBASE_AUTH_UID --role reviewer
+```
+
+확인한 명령에 `--apply`를 추가하면 저장합니다. `editor`, `reviewer`, `admin`은 각각 편집자, 검수자, 발행 운영자입니다. `member`는 운영 역할을 회수합니다. 기존의 다른 Firebase 커스텀 클레임은 유지됩니다. 권한 적용 시 기존 세션을 만료하므로 회원은 다시 로그인해야 합니다.
