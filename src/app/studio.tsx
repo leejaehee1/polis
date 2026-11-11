@@ -4,6 +4,7 @@ import { canEdit, categories } from "@/lib/policy";
 import type { Command, Content, Role } from "@/lib/policy";
 import type { StaffTopic } from "@/lib/store";
 import { formValues, formatDate } from "./ui";
+import { starterTopicId } from "@/lib/starter";
 import type { Run } from "./polis";
 
 const fields = {
@@ -53,6 +54,13 @@ export function Studio({ role, topics, run, busy }: { role: Role; topics: StaffT
         </select>
       </label>
     </div>
+    {canEdit(role) && !topics.length && !creating && <section className="section-rule narrow">
+      <h2>첫 학습 주제</h2>
+      <p>런던 혼잡통행료 사례의 학습 내용과 출처를 검수용 초안으로 저장할 수 있습니다.</p>
+      <button className="secondary" disabled={busy} onClick={async () => {
+        if (await run({ type: "createStarter" })) setSelected(starterTopicId);
+      }}>런던 사례 초안 만들기</button>
+    </section>}
     {creating && <div className="section-rule narrow"><h2>새 학습 주제</h2>
       <ContentForm busy={busy} save={async (content) => { if (await run({ type: "create", content })) setCreating(false); }} />
     </div>}

@@ -5,6 +5,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import { applyCommand, canEdit, canReview, consentVersion, PolicyError, roles } from "./policy";
 import type { Actor, Command, Profile, Role, Topic } from "./policy";
 import { seedTopic } from "./seed";
+import { starterTopicId } from "./starter";
 
 type Demo = { topics: Map<string, Topic>; profiles: Map<string, Profile>; role: Role | null; touched: number };
 const globals = globalThis as typeof globalThis & { polisDemos?: Map<string, Demo> };
@@ -82,12 +83,14 @@ export async function writeState(command: Command, actor: Actor, demo?: Demo) {
   const profile: Profile | undefined = command.type === "consent"
     ? { name: command.name, version: consentVersion, acceptedAt: at }
     : undefined;
+  const topicId = "topic" in command ? command.topic : command.type === "createStarter" ? starterTopicId : newId;
   if (demo) {
     if (profile) demo.profiles.set(actor.id, profile);
     if (command.type !== "consent") {
-      const id = command.type === "create" ? newId : command.topic;
-      if (command.type === "create" && demo.topics.size >= 20) throw new PolicyError(409, "데모에서는 주제를 20개까지 만들 수 있습니다.");
-      demo.topics.set(id, ensureCapacity(applyCommand(demo.topics.get(id), command, actor, demo.profiles.get(actor.id), newId, at)));
+      if (!demo.topics.has(topicId) && demo.topics.size >= 20 && (command.type === "create" || command.type === "createStarter")) {
+        throw new PolicyError(409, "데모에서는 주제를 20개까지 만들 수 있습니다.");
+      }
+      demo.topics.set(topicId, ensureCapacity(applyCommand(demo.topics.get(topicId), command, actor, demo.profiles.get(actor.id), newId, at)));
     }
     return;
   }
@@ -102,12 +105,11 @@ export async function writeState(command: Command, actor: Actor, demo?: Demo) {
     return;
   }
   if (command.type === "consent") return;
-  const id = command.type === "create" ? newId : command.topic;
-  const record = db.collection("polisTopics").doc(id);
+  const record = db.collection("polisTopics").doc(topicId);
   await db.runTransaction(async (tx) => {
     const [topic, profile] = await tx.getAll(record, member);
     const next = ensureCapacity(applyCommand(topic.data() as Topic | undefined, command, actor, profile.data() as Profile | undefined, newId, at));
-    tx.set(record, next);
+    if (command.type !== "createStarter" || !topic.exists) tx.set(record, next);
   });
 }
 

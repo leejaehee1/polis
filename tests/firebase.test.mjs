@@ -179,10 +179,11 @@ test("Firebase emulators verify identity, claims, consent, publication and Fires
 
   await auth.updateUser(member.uid, { disabled: true });
   await send(member.token, undefined, 401);
+  await db.collection("polisTopics").doc(topic).delete();
 });
 
 
-test("Google popup signup and consent update the account view without reloading", {
+test("Google signup, consent and starter draft work without reloading", {
   skip: process.env.POLIS_FIREBASE_BROWSER !== "1", timeout: 60_000,
 }, async (t) => {
   assert.match(authHost ?? "", local);
@@ -233,6 +234,12 @@ test("Google popup signup and consent update the account view without reloading"
   await page.getByRole("status").getByText("가입을 완료했습니다. 로그인 상태입니다.").waitFor();
   assert.equal(reloads, 0);
 
+  const app = initializeApp({ projectId }, "starter-browser-test");
+  t.after(() => deleteApp(app));
+  const auth = getAuth(app);
+  const member = await auth.getUserByEmail(email);
+  await auth.setCustomUserClaims(member.uid, { polisRole: "admin" });
+
   await page.getByRole("button", { name: "로그아웃" }).click();
   const [returningPopup] = await Promise.all([
     page.waitForEvent("popup"),
@@ -243,6 +250,21 @@ test("Google popup signup and consent update the account view without reloading"
   await page.getByRole("heading", { name: nickname }).waitFor();
   await page.getByRole("status").getByText("로그인했습니다.", { exact: true }).waitFor();
   assert.equal(reloads, 0);
+
+  await page.getByRole("link", { name: "편집실" }).click();
+  await page.getByRole("button", { name: "런던 사례 초안 만들기" }).click();
+  await page.getByRole("heading", { name: /런던 혼잡통행료는/ }).waitFor();
+  await page.getByText("검수 대기", { exact: true }).waitFor();
+
+  const db = getFirestore(app);
+  const starter = db.collection("polisTopics").doc("starter-london-congestion");
+  const draft = (await starter.get()).data();
+  assert.equal(draft.draft.author, member.uid);
+  assert.equal(draft.draft.sources.length, 1);
+  assert.equal(draft.draft.sources[0].review, undefined);
+  assert.deepEqual(draft.versions, []);
+  assert.deepEqual((await send()).topics, []);
+  await starter.delete();
 });
 
 test("role command previews before writing, preserves other claims and can remove a role", async (t) => {

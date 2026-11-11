@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { starterTopic, starterTopicId } from "./starter";
 
 const short = z.string().trim().min(2).max(140);
 const paragraph = z.string().trim().min(10).max(2500);
@@ -24,6 +25,7 @@ export const consentText = {
 export const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("consent"), name: z.string().trim().min(2).max(24), terms: z.literal(true), privacy: z.literal(true), version: z.literal(consentVersion) }),
   z.object({ type: z.literal("create"), content: contentSchema }),
+  z.object({ type: z.literal("createStarter") }),
   z.object({ type: z.literal("revise"), topic: id, reason: paragraph }),
   z.object({ type: z.literal("edit"), topic: id, revision: id, content: contentSchema }),
   z.object({ type: z.literal("source"), topic: id, revision: id, source: sourceSchema }),
@@ -94,12 +96,15 @@ export function applyCommand(
   newId: string, at: string,
 ): Topic {
   requireState(profile?.version === consentVersion, "이용 규칙과 개인정보 안내에 먼저 동의해 주세요.", 403);
-  if (command.type === "create") {
+  if (command.type === "create" || command.type === "createStarter") {
     requireState(canEdit(actor.role), "편집 권한이 필요합니다.", 403);
+    if (command.type === "createStarter" && existing) return existing;
+    const sample = command.type === "createStarter";
+    const { content, sources } = command.type === "create" ? { content: command.content, sources: [] } : structuredClone(starterTopic);
     return {
-      id: newId, versions: [], comments: [], reports: [],
-      draft: { id: newId, number: 1, content: command.content, sources: [], reason: "", author: actor.id, status: "draft", feedback: "" },
-      audit: [{ action: "초안 작성", by: actor.id, at }],
+      id: sample ? starterTopicId : newId, versions: [], comments: [], reports: [],
+      draft: { id: newId, number: 1, content, sources, reason: "", author: actor.id, status: "draft", feedback: "" },
+      audit: [{ action: sample ? "런던 혼잡통행료 초안 작성" : "초안 작성", by: actor.id, at }],
     };
   }
   requireState(existing, "주제를 찾을 수 없습니다.", 404);

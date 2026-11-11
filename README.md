@@ -28,7 +28,7 @@ npm run dev
 4. 서버에서 Application Default Credentials를 구성합니다. 로컬 서비스 계정 파일은 저장소 밖에 보관합니다. 배포 환경은 서비스 ID에 필요한 Firebase Auth 및 Firestore 권한을 부여합니다.
 5. 검증된 관리 환경의 Firebase Admin SDK로 대상 UID에 `polisRole` 커스텀 클레임을 부여합니다. 값은 `editor`, `reviewer`, `admin`입니다. 기존 클레임과 병합하고 대상 사용자가 다시 로그인하도록 합니다. 클레임 없는 사용자는 시민으로 등록됩니다.
 
-Firebase 모드는 빈 아카이브에서 시작합니다. 운영 패널에서 첫 주제를 발행합니다. Firebase 인증 토큰과 이메일 인증 여부, 동의 버전, 편집·검수·발행 권한을 서버에서 검사합니다. 주제와 이력은 주제별 문서에 트랜잭션으로 저장하며, 현재 구현은 초기 운영 규모를 위한 문서 크기 한도와 전체 목록 조회 방식을 사용합니다.
+Firebase 모드는 빈 아카이브에서 시작합니다. 편집실의 **런던 사례 초안 만들기**로 학습 내용과 원문 출처를 등록하거나 새 주제를 직접 작성할 수 있습니다. 초안을 공개하려면 독립 검수와 발행이 필요합니다. Firebase 인증 토큰과 이메일 인증 여부, 동의 버전, 편집·검수·발행 권한을 서버에서 검사합니다. 주제와 이력은 주제별 문서에 트랜잭션으로 저장하며, 현재 구현은 초기 운영 규모를 위한 문서 크기 한도와 전체 목록 조회 방식을 사용합니다.
 
 - [Firebase Admin SDK 설정](https://firebase.google.com/docs/admin/setup)
 - [Firebase Auth 커스텀 클레임](https://firebase.google.com/docs/auth/admin/custom-claims)

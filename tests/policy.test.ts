@@ -97,3 +97,14 @@ test("rejects non-HTTPS links, missing consent and invalid identifiers", () => {
   assert.equal(commandSchema.safeParse({ type: "consent", name: "시민", terms: true, privacy: false, version: consentVersion }).success, false);
   assert.equal(commandSchema.safeParse({ type: "comment", topic: "../draft", version: 1, body: reason }).success, false);
 });
+
+test("starter draft is private, pending source review, and idempotent", () => {
+  const flow = workflow();
+  const command = { type: "createStarter" } as const;
+  assert.throws(() => flow.apply(command, citizen), hasStatus(403));
+  const draft = flow.apply(command, editor);
+  assert.equal(draft.draft?.author, editor.id);
+  assert.equal(draft.draft?.sources[0].review, undefined);
+  assert.equal(publicTopic(draft), null);
+  assert.equal(flow.apply(command, admin), draft);
+});
