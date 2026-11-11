@@ -13,9 +13,18 @@ function demoOrigin(request: NextRequest) {
   return URL.canParse(address) ? new URL(address).origin : null;
 }
 
+const localEmulator = /^(?:127\.0\.0\.1|localhost):[0-9]{1,5}$/;
+
 function mode(request: NextRequest) {
   const value = process.env.POLIS_MODE ?? "demo";
-  if (value === "firebase") return false;
+  const authHost = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+  const firestoreHost = process.env.FIRESTORE_EMULATOR_HOST;
+  if (value === "firebase" && !authHost && !firestoreHost) return false;
+  if (
+    value === "firebase-emulator" && demoOrigin(request) &&
+    process.env.FIREBASE_PROJECT_ID?.startsWith("demo-") &&
+    localEmulator.test(authHost ?? "") && localEmulator.test(firestoreHost ?? "")
+  ) return false;
   if (value === "demo" && demoOrigin(request)) return true;
   throw new PolicyError(503, "POLIS 실행 환경을 설정해 주세요. 데모는 로컬에서만 사용할 수 있습니다.");
 }

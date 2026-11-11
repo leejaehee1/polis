@@ -11,7 +11,8 @@
     "start": "next start --hostname 127.0.0.1",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "test:e2e": "node --test tests/browser.test.mjs"
+    "test:e2e": "node --test tests/browser.test.mjs",
+    "test:firebase": "firebase emulators:exec --project demo-polis --only auth,firestore \"node --test tests/firebase.test.mjs\""
   },
   "dependencies": {
     "firebase": "^13.2.0",
