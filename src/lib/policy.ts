@@ -22,6 +22,9 @@ export const consentText = {
   privacy: "서비스는 계정 식별자, 공개 닉네임, 동의 버전과 시각을 저장합니다. 게시 의견은 닉네임과 함께 공개되고, 신고 사유는 검수 담당자에게만 공개됩니다.",
 };
 
+export const opinionKinds = ["evidence", "question", "alternative"] as const;
+export type OpinionKind = typeof opinionKinds[number];
+
 export const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("consent"), name: z.string().trim().min(2).max(24), terms: z.literal(true), privacy: z.literal(true), version: z.literal(consentVersion) }),
   z.object({ type: z.literal("create"), content: contentSchema }),
@@ -35,7 +38,7 @@ export const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("return"), topic: id, revision: id, reason: paragraph }),
   z.object({ type: z.literal("approve"), topic: id, revision: id }),
   z.object({ type: z.literal("publish"), topic: id, revision: id }),
-  z.object({ type: z.literal("comment"), topic: id, version: z.number().int().positive(), body: paragraph }),
+  z.object({ type: z.literal("comment"), topic: id, version: z.number().int().positive(), body: paragraph, kind: z.enum(opinionKinds).optional() }),
   z.object({ type: z.literal("report"), topic: id, commentId: id, reason: paragraph }),
   z.object({ type: z.literal("resolve"), topic: id, reportId: id, hide: z.boolean(), reason: paragraph }),
 ]);
@@ -55,7 +58,7 @@ export type Draft = Omit<Revision, "publishedAt"> & {
   author: string; status: "draft" | "review" | "approved"; feedback: string;
 };
 export type Comment = {
-  id: string; by: string; name: string; body: string; version: number; at: string; hidden: boolean;
+  id: string; by: string; name: string; body: string; version: number; at: string; hidden: boolean; kind?: OpinionKind;
 };
 export type Report = {
   id: string; commentId: string; by: string; reason: string; at: string;
@@ -86,7 +89,7 @@ export function publicTopic(topic: Topic) {
       ...version,
       sources: version.sources.map(({ id, title, publisher, url, evidence }) => ({ id, title, publisher, url, evidence })),
     })),
-    comments: topic.comments.filter((comment) => !comment.hidden).map(({ id, name, body, version, at }) => ({ id, name, body, version, at })),
+    comments: topic.comments.filter((comment) => !comment.hidden).map(({ id, name, body, version, at, kind }) => ({ id, name, body, version, at, ...(kind ? { kind } : {}) })),
   };
 }
 export type PublicTopic = NonNullable<ReturnType<typeof publicTopic>>;
@@ -120,7 +123,7 @@ export function applyCommand(
     if (command.type === "comment") {
       requireState(current.number === command.version, "새 버전이 발행됐습니다. 새로고침 후 내용을 확인해 주세요.");
       requireState(!topic.comments.some((item) => item.by === actor.id && Date.parse(at) - Date.parse(item.at) < 15_000), "15초 뒤 다시 작성해 주세요.", 429);
-      topic.comments.push({ id: newId, by: actor.id, name: profile.name, body: command.body, version: current.number, at, hidden: false });
+      topic.comments.push({ id: newId, by: actor.id, name: profile.name, body: command.body, version: current.number, at, hidden: false, ...(command.kind ? { kind: command.kind } : {}) });
     } else {
       const comment = topic.comments.find((item) => item.id === command.commentId && !item.hidden);
       requireState(comment && comment.by !== actor.id, "다른 회원의 공개 의견만 신고할 수 있습니다.", 400);

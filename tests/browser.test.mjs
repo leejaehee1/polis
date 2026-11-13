@@ -49,14 +49,20 @@ test("mobile demo: independent review, publishing, correction, discussion and mo
   }
 
   await visit("home");
-  await heading(/근거로 읽고/).waitFor();
-  await page.getByRole("link", { name: /읽어볼 정책/ }).click();
+  await heading(/정책을 읽고/).waitFor();
+  await page.getByRole("link", { name: /런던 혼잡통행료/ }).first().click();
   await heading("관측된 성과").waitFor();
   await heading("한계와 해석").waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await visit("learn");
   await label("정책 검색").fill("결과없음");
   await page.getByText("조건에 맞는 공개 정책이 없습니다.").waitFor();
+
+  await visit("compare");
+  await heading("비교할 발행본이 더 필요합니다").waitFor();
+  await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: "시민 교실" }).click();
+  await page.getByRole("radio", { name: /같은 방법으로/ }).check();
+  await page.getByRole("status").filter({ hasText: "맞습니다." }).waitFor();
 
   await role("편집자", "시험 편집자");
   await visit("studio");
@@ -87,9 +93,15 @@ test("mobile demo: independent review, publishing, correction, discussion and mo
   assert.ok(topicHash);
   await role("시민", "시험 시민");
   await visit(topicHash.slice(1));
+  await label("의견 유형").selectOption("question");
   await label("의견과 근거").fill("대체 교통수단별 관측 자료를 함께 읽어보고 싶습니다.");
   await button("의견 게시").click();
-  await page.getByText("대체 교통수단별 관측 자료를 함께 읽어보고 싶습니다.").waitFor();
+  const opinion = page.getByText("대체 교통수단별 관측 자료를 함께 읽어보고 싶습니다.");
+  await opinion.waitFor();
+  await label("표시할 의견").selectOption("alternative");
+  await page.getByText("이 유형의 공개 의견이 없습니다.").waitFor();
+  await label("표시할 의견").selectOption("question");
+  await opinion.waitFor();
 
   await role("편집자", "시험 편집자");
   await studio();
@@ -121,6 +133,19 @@ test("mobile demo: independent review, publishing, correction, discussion and mo
   await page.getByRole("link", { name: /^v1 · / }).click();
   await page.getByText(/이전 버전을 읽고 있습니다/).waitFor();
   await page.getByText("아직 공개 의견이 없습니다.").waitFor();
+  await visit("compare");
+  await label("첫 번째 발행본").selectOption({ label: title + " · v2" });
+  await label("두 번째 발행본").selectOption({ label: title + " · v1" });
+  await heading(title + " · v2").first().waitFor();
+  await heading(title + " · v1").first().waitFor();
+  for (const width of [320, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const route of ["home", "compare", "classroom"]) {
+      await visit(route);
+      await page.getByRole("heading", { level: 1, name: /정책을 읽고|정책 비교실|시민 교실/ }).waitFor();
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, route + " at " + width);
+    }
+  }
   assert.deepEqual(exceptions, []);
 
   const anonymous = await browser.newPage();
