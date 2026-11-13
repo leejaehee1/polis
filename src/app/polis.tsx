@@ -8,7 +8,8 @@ import { categories, consentText, consentVersion, opinionKinds, roles } from "@/
 import type { Command, OpinionKind, Profile, PublicTopic, Role } from "@/lib/policy";
 import type { StaffTopic } from "@/lib/store";
 import { formValues, formatDate } from "./ui";
-import { CivicClassroom, ExploreHome, PolicyCompare } from "./explore";
+import { ExploreHome, PolicyCompare } from "./explore";
+import { CivicClassroom } from "./classroom";
 import { Studio } from "./studio";
 
 type Snapshot = {
@@ -16,14 +17,14 @@ type Snapshot = {
   viewer: { role: Role; profile?: Profile; consented: boolean } | null;
   topics: PublicTopic[]; staff: StaffTopic[];
 };
-type Destination = { page: string; id?: string; version?: number };
+type Destination = { page: string; id?: string; version?: number; section?: string };
 export type Run = (command: Command) => Promise<boolean>;
 export const roleNames: Record<Role, string> = {
   member: "시민", editor: "편집자", reviewer: "검수자", admin: "발행 운영자",
 };
 function destination(): Destination {
-  const [page, id, version] = window.location.hash.slice(1).split("/");
-  return { page: page || "home", id, version: version ? Number(version) : undefined };
+  const [page, id, version, section] = window.location.hash.slice(1).split("/");
+  return { page: page || "home", id, version: version ? Number(version) : undefined, section };
 }
 
 function useSnapshot() {
@@ -164,8 +165,13 @@ export function Polis() {
   }, []);
   const viewer = data?.viewer;
   const staff = viewer && viewer.role !== "member";
-  const selected = data?.topics.find((topic) => topic.id === route.id);
-  const featured = data?.topics.reduce<PublicTopic | undefined>((latest, topic) =>
+  const policies = data?.topics.filter((topic) => !topic.versions.at(-1)?.content.lesson);
+  const lessons = data?.topics.filter((topic) => topic.versions.at(-1)?.content.lesson);
+  const selected = policies?.find((topic) => topic.id === route.id);
+  useEffect(() => {
+    if (route.page === "topic" && selected && route.section) document.getElementById(route.section)?.focus();
+  }, [route, selected]);
+  const featured = policies?.reduce<PublicTopic | undefined>((latest, topic) =>
     !latest || Date.parse(topic.versions.at(-1)!.publishedAt) > Date.parse(latest.versions.at(-1)!.publishedAt) ? topic : latest, undefined);
 
   let page: ReactNode;
@@ -186,11 +192,11 @@ export function Polis() {
   } else if (route.page === "studio") {
     page = <section className="page">
       <h1>편집실</h1>
-      {staff && viewer.consented ? <Studio role={viewer.role} topics={data.staff} run={submit} busy={busy} />
+      {staff && viewer.consented ? <Studio role={viewer.role} topics={data.staff} policies={policies ?? []} run={submit} busy={busy} />
         : <p>동의를 완료한 운영 역할로 이용할 수 있습니다. <a href="#account">계정 열기</a></p>}
     </section>;
   } else if (route.page === "topic") {
-    page = selected ? <TopicDetail key={selected.id} topic={selected} version={route.version} canParticipate={!!viewer?.consented} run={submit} busy={busy} />
+    page = selected ? <TopicDetail key={selected.id} topic={selected} version={route.version} lessons={lessons ?? []} canParticipate={!!viewer?.consented} run={submit} busy={busy} />
       : <section className="page"><h1>{data ? "정책 주제를 찾을 수 없습니다" : "정책을 불러오는 중"}</h1><a href="#learn">정책 목록 보기</a></section>;
   } else if (route.page === "rules") {
     page = <section className="narrow page">
@@ -202,13 +208,13 @@ export function Polis() {
       <h2>개인정보 안내</h2><p>{consentText.privacy}</p>
     </section>;
   } else if (route.page === "compare") {
-    page = <PolicyCompare topics={data?.topics} />;
+    page = <PolicyCompare topics={policies} />;
   } else if (route.page === "classroom") {
-    page = <CivicClassroom featured={featured} />;
+    page = <CivicClassroom key={route.id ?? "list"} selected={route.id} returnVersion={route.version} lessons={lessons} policies={policies ?? []} />;
   } else if (route.page === "learn") {
-    page = <section className="page"><h1>정책 아카이브</h1><Archive topics={data?.topics} /></section>;
+    page = <section className="page"><h1>정책 아카이브</h1><Archive topics={policies} /></section>;
   } else {
-    page = <><ExploreHome featured={featured} /><Archive topics={data?.topics} home /></>;
+    page = <><ExploreHome featured={featured} /><Archive topics={policies} home /></>;
   }
 
   return <>
@@ -282,8 +288,8 @@ const opinionLabels: Record<OpinionKind, string> = {
   evidence: "근거와 해석", question: "질문", alternative: "대안 제안",
 };
 
-function TopicDetail({ topic, version, canParticipate, run, busy }: {
-  topic: PublicTopic; version?: number; canParticipate: boolean; run: Run; busy: boolean;
+function TopicDetail({ topic, version, lessons, canParticipate, run, busy }: {
+  topic: PublicTopic; version?: number; lessons: PublicTopic[]; canParticipate: boolean; run: Run; busy: boolean;
 }) {
   const current = topic.versions.at(-1)!;
   const record = version ? topic.versions.find((item) => item.number === version) : current;
@@ -294,13 +300,17 @@ function TopicDetail({ topic, version, canParticipate, run, busy }: {
   const comments = topic.comments.filter((comment) => !activeFilter || comment.kind === activeFilter);
   if (!record) return <section className="page"><h1>버전을 찾을 수 없습니다</h1><a href={"#topic/" + topic.id}>최신 버전 보기</a></section>;
   const content = record.content;
+  const related = (section: string) => lessons.filter((item) => {
+    const lesson = item.versions.at(-1)?.content.lesson;
+    return lesson?.policyId === topic.id && lesson.section === section;
+  }).map((item) => <p className="lesson-link" key={item.id}><a href={`#classroom/${item.id}/${record.number}`}>3분 수업 · {item.versions.at(-1)!.content.title}</a></p>);
   return <article className="page detail">
     <a href="#learn" className="back">‹ 정책 아카이브</a>
     <p className="metadata">{content.category} · v{record.number} · {formatDate(record.publishedAt)}</p>
     <h1>{content.title}</h1><p className="lead">{content.summary}</p>
     {record !== current && <p className="message">이전 버전을 읽고 있습니다. <a href={"#topic/" + topic.id}>최신 버전 보기</a></p>}
     <section className="section-rule"><h2>정책의 배경</h2><p>{content.background}</p></section>
-    <div className="comparison"><section><h2>관측된 성과</h2><p>{content.results}</p></section><section><h2>한계와 해석</h2><p>{content.limits}</p></section></div>
+    <div className="comparison"><section id="results" tabIndex={-1}><h2>관측된 성과</h2><p>{content.results}</p>{related("results")}</section><section id="limits" tabIndex={-1}><h2>한계와 해석</h2><p>{content.limits}</p>{related("limits")}</section></div>
     <section className="section-rule">
       <h2>근거 자료</h2>
       <ol className="sources">{record.sources.map((source) => <li key={source.id}>
@@ -313,9 +323,10 @@ function TopicDetail({ topic, version, canParticipate, run, busy }: {
         <a href={["#topic", topic.id, item.number].join("/")}>v{item.number} · {formatDate(item.publishedAt)}</a><p>{item.reason || "최초 발행"}</p>
       </li>)}</ol>
     </details>
-    <section className="section-rule discussion">
+    <section id="discussion" tabIndex={-1} className="section-rule discussion">
       <h2>시민 토론</h2>
       <p className="question">{content.question}</p>
+      {related("discussion")}
       {canParticipate && record === current ? <form className="form" onSubmit={async (event) => {
         const form = event.currentTarget;
         const values = formValues(event);

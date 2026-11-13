@@ -97,30 +97,3 @@ export function PolicyCompare({ topics }: { topics?: PublicTopic[] }) {
     </>}
   </section>;
 }
-
-const answerOptions = [
-  { label: "도입 전후에 같은 방법으로 측정했는지 확인한다.", feedback: "맞습니다. 측정 방법이 같아야 두 수치의 차이를 해석할 수 있습니다. 도로 공사나 교통수단 변화도 함께 확인하면 정책의 영향을 판단하는 데 도움이 됩니다." },
-  { label: "도입 이후 수치가 줄었으므로 변화 전체를 정책 효과로 본다.", feedback: "측정 기간과 방법을 먼저 비교해 보세요. 같은 기간에 일어난 다른 변화도 수치에 영향을 줄 수 있습니다." },
-] as const;
-
-export function CivicClassroom({ featured }: { featured?: PublicTopic }) {
-  const [answer, setAnswer] = useState<number | null>(null);
-  return <section className="page narrow classroom">
-    <h1>시민 교실</h1>
-    <p className="lead">정책의 효과를 판단하기 전에 확인할 세 가지입니다.</p>
-    <ol className="reading-steps">
-      <li><h2>무엇을 바꾸려 했나요?</h2><p>정책 목표를 찾고, 그 목표가 어떤 지표로 측정되는지 확인하세요.</p></li>
-      <li><h2>무엇과 비교했나요?</h2><p>전후 수치를 읽을 때는 비교 기준과 관측 기간, 같은 시기에 일어난 변화를 살펴보세요.</p></li>
-      <li><h2>원문에서 무엇을 확인할 수 있나요?</h2><p>보고서의 표나 본문에서 수치와 단위를 찾고, 자료가 다루는 범위를 확인하세요.</p></li>
-    </ol>
-    <fieldset className="study-note classroom-exercise">
-      <legend>이해 확인</legend>
-      <p>도심 교통 정책을 도입한 뒤 지체 시간이 줄었다는 보고서를 읽었습니다. 효과를 해석하기 전에 무엇을 확인하면 좋을까요?</p>
-      {answerOptions.map(({ label }, index) => <label key={label}>
-        <input type="radio" name="reading-check" checked={answer === index} onChange={() => setAnswer(index)} />{label}
-      </label>)}
-      <p role="status">{answer !== null && answerOptions[answer].feedback}</p>
-    </fieldset>
-    <a className="primary" href={featured ? `#topic/${featured.id}` : "#learn"}>{featured ? "공개 정책에 적용해 보기" : "공개 정책 탐색"}</a>
-  </section>;
-}

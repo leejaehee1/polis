@@ -61,8 +61,7 @@ test("mobile demo: independent review, publishing, correction, discussion and mo
   await visit("compare");
   await heading("비교할 발행본이 더 필요합니다").waitFor();
   await page.getByRole("navigation", { name: "주 메뉴" }).getByRole("link", { name: "시민 교실" }).click();
-  await page.getByRole("radio", { name: /같은 방법으로/ }).check();
-  await page.getByRole("status").filter({ hasText: "맞습니다." }).waitFor();
+  await page.getByText("검수와 발행을 마친 수업이 여기에 표시됩니다.").waitFor();
 
   await role("편집자", "시험 편집자");
   await visit("studio");
@@ -146,12 +145,42 @@ test("mobile demo: independent review, publishing, correction, discussion and mo
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, route + " at " + width);
     }
   }
+  const lessonTitle = "차가 줄면 길도 덜 막힐까?";
+  await role("편집자", "시험 편집자");
+  await visit("studio");
+  await page.locator("summary").filter({ hasText: "런던 사례 수업 초안 만들기" }).click();
+  await button(lessonTitle).click();
+  await heading(lessonTitle).waitFor();
+  await button("검수 요청").click();
+  await page.getByText("v1 · 검수 중").waitFor();
+  await visit("classroom");
+  await page.getByText("검수와 발행을 마친 수업이 여기에 표시됩니다.").waitFor();
+  await role("검수자", "시험 검수자");
+  await visit("studio");
+  await page.getByRole("combobox", { name: "주제 선택" }).selectOption({ label: lessonTitle });
+  await review(1);
+  await role("발행 운영자", "시험 운영자");
+  await visit("studio");
+  await page.getByRole("combobox", { name: "주제 선택" }).selectOption({ label: lessonTitle });
+  await button("공개 발행").click();
+  await page.getByRole("link", { name: "공개 버전 v1 보기" }).waitFor();
+  await visit("topic/london-congestion");
+  await page.getByRole("link", { name: "3분 수업 · " + lessonTitle }).click();
+  await heading(lessonTitle).waitFor();
+  await page.getByRole("radio", { name: /같은 도로와 시간대/ }).check();
+  await page.getByRole("status").filter({ hasText: "맞습니다." }).waitFor();
+  await page.getByRole("link", { name: "정책 글에 적용하기" }).click();
+  await page.waitForFunction(() => document.activeElement?.id === "results");
+  await visit("learn");
+  assert.equal(await heading(lessonTitle).count(), 0);
   assert.deepEqual(exceptions, []);
 
   const anonymous = await browser.newPage();
   await anonymous.goto(url + "/#learn");
   await anonymous.getByRole("heading", { name: /런던 혼잡통행료/ }).waitFor();
   assert.equal(await anonymous.getByRole("heading", { name: title }).count(), 0);
+  await anonymous.goto(url + "/#classroom");
+  await anonymous.getByText("검수와 발행을 마친 수업이 여기에 표시됩니다.").waitFor();
 });
 
 test("API rejects cross-origin writes and anonymous posting", async () => {
