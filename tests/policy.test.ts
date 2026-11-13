@@ -108,3 +108,25 @@ test("starter draft is private, pending source review, and idempotent", () => {
   assert.equal(publicTopic(draft), null);
   assert.equal(flow.apply(command, admin), draft);
 });
+
+test("lesson templates stay private through review and use the normal publication workflow", () => {
+  for (const key of ["traffic-delay", "before-after", "costs-benefits"] as const) {
+    const flow = workflow();
+    const command = { type: "createLessonStarter", key, policyId: seedTopic.id } as const;
+    assert.throws(() => flow.apply(command, citizen), hasStatus(403));
+    flow.apply(command, editor);
+    const draft = flow.topic.draft!;
+    assert.equal(draft.content.lesson?.policyId, seedTopic.id);
+    assert.ok(commandSchema.safeParse({ type: "create", content: draft.content }).success);
+    assert.equal(flow.apply(command, editor).draft?.id, draft.id);
+    flow.apply({ type: "submit", ...flow.target() }, editor);
+    assert.equal(publicTopic(flow.topic), null);
+    assert.throws(() => flow.apply({ type: "approve", ...flow.target() }, { ...admin, id: editor.id }), hasStatus(403));
+    flow.apply({ type: "verify", ...flow.target(), sourceId: draft.sources[0].id, note: reason }, reviewer);
+    flow.apply({ type: "approve", ...flow.target() }, reviewer);
+    assert.equal(publicTopic(flow.topic), null);
+    flow.apply({ type: "publish", ...flow.target() }, admin);
+    assert.equal(publicTopic(flow.topic)?.versions[0].content.lesson?.policyId, seedTopic.id);
+    assert.throws(() => flow.apply({ type: "comment", topic: flow.topic.id, version: 1, body: reason }, citizen), hasStatus(409));
+  }
+});

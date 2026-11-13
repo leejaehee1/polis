@@ -179,3 +179,6 @@ input[type=checkbox] { width: 1.12rem; height: 1.12rem; accent-color: var(--fore
   .compare-controls, .compare-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .compare-row h2 { grid-column: 1 / -1; }
 }
+
+.lesson-link { margin-block: .65rem; }
+.classroom section p { white-space: pre-wrap; }

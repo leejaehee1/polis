@@ -2,10 +2,9 @@ import { randomUUID } from "node:crypto";
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-import { applyCommand, canEdit, canReview, consentVersion, PolicyError, roles } from "./policy";
+import { applyCommand, canEdit, canReview, consentVersion, PolicyError, roles, topicIdFor } from "./policy";
 import type { Actor, Command, Profile, Role, Topic } from "./policy";
 import { seedTopic } from "./seed";
-import { starterTopicId } from "./starter";
 
 type Demo = { topics: Map<string, Topic>; profiles: Map<string, Profile>; role: Role | null; touched: number };
 const globals = globalThis as typeof globalThis & { polisDemos?: Map<string, Demo> };
@@ -83,14 +82,16 @@ export async function writeState(command: Command, actor: Actor, demo?: Demo) {
   const profile: Profile | undefined = command.type === "consent"
     ? { name: command.name, version: consentVersion, acceptedAt: at }
     : undefined;
-  const topicId = "topic" in command ? command.topic : command.type === "createStarter" ? starterTopicId : newId;
+  const topicId = command.type === "consent" ? newId : topicIdFor(command, newId);
   if (demo) {
     if (profile) demo.profiles.set(actor.id, profile);
     if (command.type !== "consent") {
-      if (!demo.topics.has(topicId) && demo.topics.size >= 20 && (command.type === "create" || command.type === "createStarter")) {
+      if (!demo.topics.has(topicId) && demo.topics.size >= 20 && (command.type === "create" || command.type === "createStarter" || command.type === "createLessonStarter")) {
         throw new PolicyError(409, "데모에서는 주제를 20개까지 만들 수 있습니다.");
       }
-      demo.topics.set(topicId, ensureCapacity(applyCommand(demo.topics.get(topicId), command, actor, demo.profiles.get(actor.id), newId, at)));
+      const next = ensureCapacity(applyCommand(demo.topics.get(topicId), command, actor, demo.profiles.get(actor.id), newId, at));
+      if (command.type === "publish") validateLessonPolicy(next, (id) => demo.topics.get(id));
+      demo.topics.set(topicId, next);
     }
     return;
   }
@@ -109,14 +110,28 @@ export async function writeState(command: Command, actor: Actor, demo?: Demo) {
   await db.runTransaction(async (tx) => {
     const [topic, profile] = await tx.getAll(record, member);
     const next = ensureCapacity(applyCommand(topic.data() as Topic | undefined, command, actor, profile.data() as Profile | undefined, newId, at));
-    if (command.type !== "createStarter" || !topic.exists) tx.set(record, next);
+    const lesson = command.type === "publish" && next.versions.at(-1)?.content.lesson;
+    if (lesson) {
+      const linked = await tx.get(db.collection("polisTopics").doc(lesson.policyId));
+      validateLessonPolicy(next, () => linked.data() as Topic | undefined);
+    }
+    if ((command.type !== "createStarter" && command.type !== "createLessonStarter") || !topic.exists) tx.set(record, next);
   });
+}
+
+function validateLessonPolicy(topic: Topic, find: (id: string) => Topic | undefined) {
+  const lesson = topic.versions.at(-1)?.content.lesson;
+  if (!lesson) return;
+  const linked = find(lesson.policyId)?.versions.at(-1);
+  if (!linked || linked.content.lesson || lesson.policyId === topic.id) {
+    throw new PolicyError(409, "공개된 정책 글을 연결해야 수업을 발행할 수 있습니다.");
+  }
 }
 
 export function staffTopic(topic: Topic, actor: Actor) {
   return {
     id: topic.id,
-    versions: topic.versions.map(({ number, content }) => ({ number, title: content.title })),
+    versions: topic.versions.map(({ number, content }) => ({ number, title: content.title, lesson: !!content.lesson })),
     draft: topic.draft,
     editable: canEdit(actor.role) && (topic.draft?.author === actor.id || actor.role === "admin"),
     reviewable: canReview(actor.role) && topic.draft?.author !== actor.id,

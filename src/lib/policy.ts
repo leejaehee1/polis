@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { starterTopic, starterTopicId } from "./starter";
 
+import { lessonKeys, starterLesson } from "./lessons";
+
 const short = z.string().trim().min(2).max(140);
 const paragraph = z.string().trim().min(10).max(2500);
 const id = z.string().regex(/^[a-zA-Z0-9-]{1,80}$/);
@@ -12,6 +14,10 @@ export const categories = ["교통", "주거", "복지", "환경", "교육", "�
 export const contentSchema = z.object({
   title: short, category: z.enum(categories), summary: paragraph,
   background: paragraph, results: paragraph, limits: paragraph, question: paragraph,
+  lesson: z.object({
+    policyId: id, section: z.enum(["results", "limits", "discussion"]),
+    correct: paragraph, incorrect: paragraph,
+  }).refine(({ correct, incorrect }) => correct !== incorrect, "정답과 오답은 서로 달라야 합니다.").optional(),
 });
 export const sourceSchema = z.object({
   title: short, publisher: short, url: httpsUrl, evidence: paragraph,
@@ -29,6 +35,7 @@ export const commandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("consent"), name: z.string().trim().min(2).max(24), terms: z.literal(true), privacy: z.literal(true), version: z.literal(consentVersion) }),
   z.object({ type: z.literal("create"), content: contentSchema }),
   z.object({ type: z.literal("createStarter") }),
+  z.object({ type: z.literal("createLessonStarter"), key: z.enum(lessonKeys), policyId: id }),
   z.object({ type: z.literal("revise"), topic: id, reason: paragraph }),
   z.object({ type: z.literal("edit"), topic: id, revision: id, content: contentSchema }),
   z.object({ type: z.literal("source"), topic: id, revision: id, source: sourceSchema }),
@@ -94,20 +101,27 @@ export function publicTopic(topic: Topic) {
 }
 export type PublicTopic = NonNullable<ReturnType<typeof publicTopic>>;
 
+export function topicIdFor(command: TopicCommand, newId: string) {
+  if ("topic" in command) return command.topic;
+  if (command.type === "createStarter") return starterTopicId;
+  if (command.type === "createLessonStarter") return "lesson-" + command.key;
+  return newId;
+}
+
 export function applyCommand(
   existing: Topic | undefined, command: TopicCommand, actor: Actor, profile: Profile | undefined,
   newId: string, at: string,
 ): Topic {
   requireState(profile?.version === consentVersion, "이용 규칙과 개인정보 안내에 먼저 동의해 주세요.", 403);
-  if (command.type === "create" || command.type === "createStarter") {
+  if (command.type === "create" || command.type === "createStarter" || command.type === "createLessonStarter") {
     requireState(canEdit(actor.role), "편집 권한이 필요합니다.", 403);
-    if (command.type === "createStarter" && existing) return existing;
-    const sample = command.type === "createStarter";
-    const { content, sources } = command.type === "create" ? { content: command.content, sources: [] } : structuredClone(starterTopic);
+    if (command.type !== "create" && existing) return existing;
+    const { content, sources } = command.type === "create" ? { content: command.content, sources: [] }
+      : structuredClone(command.type === "createStarter" ? starterTopic : starterLesson(command.key, command.policyId));
     return {
-      id: sample ? starterTopicId : newId, versions: [], comments: [], reports: [],
+      id: topicIdFor(command, newId), versions: [], comments: [], reports: [],
       draft: { id: newId, number: 1, content, sources, reason: "", author: actor.id, status: "draft", feedback: "" },
-      audit: [{ action: sample ? "런던 혼잡통행료 초안 작성" : "초안 작성", by: actor.id, at }],
+      audit: [{ action: content.lesson ? "시민 교실 수업 초안 작성" : "초안 작성", by: actor.id, at }],
     };
   }
   requireState(existing, "주제를 찾을 수 없습니다.", 404);
@@ -121,6 +135,7 @@ export function applyCommand(
   if (command.type === "comment" || command.type === "report") {
     requireState(current, "공개된 주제에만 참여할 수 있습니다.", 404);
     if (command.type === "comment") {
+      requireState(!current.content.lesson, "정책 글에서 토론에 참여해 주세요.", 409);
       requireState(current.number === command.version, "새 버전이 발행됐습니다. 새로고침 후 내용을 확인해 주세요.");
       requireState(!topic.comments.some((item) => item.by === actor.id && Date.parse(at) - Date.parse(item.at) < 15_000), "15초 뒤 다시 작성해 주세요.", 429);
       topic.comments.push({ id: newId, by: actor.id, name: profile.name, body: command.body, version: current.number, at, hidden: false, ...(command.kind ? { kind: command.kind } : {}) });
@@ -161,6 +176,7 @@ export function applyCommand(
     requireState(canEdit(actor.role) && (draft.author === actor.id || actor.role === "admin"), "이 초안을 편집할 권한이 없습니다.", 403);
     requireState(draft.status === "draft", "초안 상태에서만 수정할 수 있습니다.");
     if (command.type === "edit") {
+      requireState(!!draft.content.lesson === !!command.content.lesson, "콘텐츠 유형을 변경할 수 없습니다.");
       draft.content = command.content;
       draft.sources = draft.sources.map(({ id, title, publisher, url, evidence }) => ({ id, title, publisher, url, evidence }));
       audit("초안 수정");

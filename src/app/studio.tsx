@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { canEdit, categories } from "@/lib/policy";
-import type { Command, Content, Role } from "@/lib/policy";
+import type { Command, Content, PublicTopic, Role } from "@/lib/policy";
 import type { StaffTopic } from "@/lib/store";
 import { formValues, formatDate } from "./ui";
+import { lessonKeys, starterLesson } from "@/lib/lessons";
 import { starterTopicId } from "@/lib/starter";
 import type { Run } from "./polis";
 
@@ -15,20 +16,39 @@ const fields = {
   question: "토론 질문",
 } as const;
 
-function ContentForm({ content, save, busy }: { content?: Content; save: (value: Content) => void; busy: boolean }) {
+const lessonFields = {
+  summary: "학습 목표", background: "개념 설명", results: "사례", limits: "문제 해설", question: "확인 문제",
+} as const;
+const sections = { results: "관측된 성과", limits: "한계와 해석", discussion: "시민 토론" } as const;
+
+function ContentForm({ content, save, busy, policies, lesson = false }: {
+  content?: Content; save: (value: Content) => void; busy: boolean; policies: PublicTopic[]; lesson?: boolean;
+}) {
   return <form className="form" onSubmit={(event) => {
     const values = formValues(event);
     save({
       title: values.title, category: values.category as Content["category"],
       summary: values.summary, background: values.background, results: values.results,
       limits: values.limits, question: values.question,
+      ...(lesson && { lesson: { policyId: values.policyId, section: values.section as keyof typeof sections, correct: values.correct, incorrect: values.incorrect } }),
     });
   }}>
-    <label>정책 제목<input name="title" required minLength={2} maxLength={140} defaultValue={content?.title} /></label>
+    <label>{lesson ? "수업 제목" : "정책 제목"}<input name="title" required minLength={2} maxLength={140} defaultValue={content?.title} /></label>
     <label>분야<select name="category" defaultValue={content?.category}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
-    {Object.entries(fields).map(([key, label]) => <label key={key}>{label}
+    {Object.entries(lesson ? lessonFields : fields).map(([key, label]) => <label key={key}>{label}
       <textarea name={key} defaultValue={content?.[key as keyof typeof fields]} required minLength={10} maxLength={2500} rows={3} />
     </label>)}
+    {lesson && <>
+      <label>연결할 공개 정책<select name="policyId" required defaultValue={content?.lesson?.policyId ?? ""}>
+        <option value="">정책을 선택하세요</option>
+        {policies.map((topic) => <option key={topic.id} value={topic.id}>{topic.versions.at(-1)!.content.title}</option>)}
+      </select></label>
+      <label>돌아갈 위치<select name="section" defaultValue={content?.lesson?.section}>
+        {Object.entries(sections).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+      </select></label>
+      <label>정답<textarea name="correct" required minLength={10} maxLength={2500} defaultValue={content?.lesson?.correct} /></label>
+      <label>오답<textarea name="incorrect" required minLength={10} maxLength={2500} defaultValue={content?.lesson?.incorrect} /></label>
+    </>}
     <button className="primary" disabled={busy}>{content ? "초안 저장" : "초안 만들기"}</button>
   </form>;
 }
@@ -40,15 +60,18 @@ function ReasonForm({ label, action, submit, busy }: { label: string; action: st
   </form>;
 }
 
-export function Studio({ role, topics, run, busy }: { role: Role; topics: StaffTopic[]; run: Run; busy: boolean }) {
-  const [creating, setCreating] = useState(false);
+export function Studio({ role, topics, policies, run, busy }: { role: Role; topics: StaffTopic[]; policies: PublicTopic[]; run: Run; busy: boolean }) {
+  const [creating, setCreating] = useState<"policy" | "lesson" | null>(null);
   const [selected, setSelected] = useState("");
   const topic = topics.find((item) => item.id === selected);
+  const london = policies.find((item) => item.id === starterTopicId || item.id === "london-congestion");
+  const remaining = lessonKeys.filter((key) => !topics.some((item) => item.id === "lesson-" + key));
   return <>
     <div className="actions">
-      {canEdit(role) && <button className="secondary" onClick={() => setCreating(!creating)}>{creating ? "작성 닫기" : "새 학습 주제"}</button>}
+      {canEdit(role) && <button className="secondary" onClick={() => setCreating(creating === "policy" ? null : "policy")}>{creating === "policy" ? "작성 닫기" : "새 학습 주제"}</button>}
+      {canEdit(role) && policies.length > 0 && <button className="secondary" onClick={() => setCreating(creating === "lesson" ? null : "lesson")}>{creating === "lesson" ? "수업 작성 닫기" : "새 시민 교실 수업"}</button>}
       <label className="inline-label">주제 선택
-        <select value={topic?.id ?? ""} onChange={(event) => { setSelected(event.target.value); setCreating(false); }}>
+        <select value={topic?.id ?? ""} onChange={(event) => { setSelected(event.target.value); setCreating(null); }}>
           <option value="">주제를 선택하세요</option>
           {topics.map((item) => <option key={item.id} value={item.id}>{item.draft?.content.title ?? item.versions.at(-1)?.title}</option>)}
         </select>
@@ -61,14 +84,20 @@ export function Studio({ role, topics, run, busy }: { role: Role; topics: StaffT
         if (await run({ type: "createStarter" })) setSelected(starterTopicId);
       }}>런던 사례 초안 만들기</button>
     </section>}
-    {creating && <div className="section-rule narrow"><h2>새 학습 주제</h2>
-      <ContentForm busy={busy} save={async (content) => { if (await run({ type: "create", content })) setCreating(false); }} />
+    {canEdit(role) && london && remaining.length > 0 && !creating && <details className="section-rule narrow">
+      <summary>런던 사례 수업 초안 만들기</summary>
+      <div className="actions">{remaining.map((key) => <button key={key} className="secondary" disabled={busy} onClick={async () => {
+        if (await run({ type: "createLessonStarter", key, policyId: london.id })) setSelected("lesson-" + key);
+      }}>{starterLesson(key, london.id).content.title}</button>)}</div>
+    </details>}
+    {creating && <div className="section-rule narrow"><h2>{creating === "lesson" ? "새 시민 교실 수업" : "새 학습 주제"}</h2>
+      <ContentForm busy={busy} policies={policies} lesson={creating === "lesson"} save={async (content) => { if (await run({ type: "create", content })) setCreating(null); }} />
     </div>}
-    {topic && !creating && <TopicStudio key={topic.id} topic={topic} role={role} run={run} busy={busy} />}
+    {topic && !creating && <TopicStudio key={topic.id} topic={topic} policies={policies} role={role} run={run} busy={busy} />}
   </>;
 }
 
-function TopicStudio({ topic, role, run, busy }: { topic: StaffTopic; role: Role; run: Run; busy: boolean }) {
+function TopicStudio({ topic, policies, role, run, busy }: { topic: StaffTopic; policies: PublicTopic[]; role: Role; run: Run; busy: boolean }) {
   const draft = topic.draft;
   const published = topic.versions.at(-1);
   const revision = draft?.id ?? "";
@@ -78,16 +107,21 @@ function TopicStudio({ topic, role, run, busy }: { topic: StaffTopic; role: Role
   const send = (command: Command) => { void run(command); };
   return <div className="section-rule studio">
     <h2>{draft?.content.title ?? published?.title}</h2>
-    {published && <p><a href={"#topic/" + topic.id}>공개 버전 v{published.number} 보기</a></p>}
+    {published && <p><a href={(published.lesson ? "#classroom/" : "#topic/") + topic.id}>공개 버전 v{published.number} 보기</a></p>}
     {published && !draft && canEdit(role) && <ReasonForm busy={busy} label="공개할 정정 사유" action="정정 초안 만들기" submit={(reason) => send({ type: "revise", topic: topic.id, reason })} />}
     {draft && <>
       <p className="metadata">v{draft.number} · {{ draft: "편집 중", review: "검수 중", approved: "발행 승인" }[draft.status]}</p>
       {draft.reason && <p><strong>정정 사유</strong> {draft.reason}</p>}
       {draft.feedback && <p className="message">보완 요청 · {draft.feedback}</p>}
       {editing ? <details><summary>학습 내용 편집</summary>
-        <ContentForm key={revision} content={draft.content} busy={busy} save={(content) => send({ type: "edit", ...target, content })} />
+        <ContentForm key={revision} content={draft.content} policies={policies} lesson={!!draft.content.lesson} busy={busy} save={(content) => send({ type: "edit", ...target, content })} />
       </details> : <details><summary>검수용 학습 내용</summary><dl>
-        {Object.entries(fields).map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{draft.content[key as keyof typeof fields]}</dd></div>)}
+        {Object.entries(draft.content.lesson ? lessonFields : fields).map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{draft.content[key as keyof typeof fields]}</dd></div>)}
+        {draft.content.lesson && <>
+          <dt>정답</dt><dd>{draft.content.lesson.correct}</dd>
+          <dt>오답</dt><dd>{draft.content.lesson.incorrect}</dd>
+          <dt>연결한 정책</dt><dd>{policies.find((item) => item.id === draft.content.lesson?.policyId)?.versions.at(-1)?.content.title ?? "공개 정책을 찾을 수 없습니다"} · {sections[draft.content.lesson.section]}</dd>
+        </>}
       </dl></details>}
       <h3>출처 검수</h3>
       {!draft.sources.length && <p>등록한 출처가 없습니다.</p>}
